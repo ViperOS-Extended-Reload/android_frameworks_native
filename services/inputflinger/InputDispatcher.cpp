@@ -1291,15 +1291,8 @@ int32_t InputDispatcher::findTouchedWindowTargetsLocked(nsecs_t currentTime,
 
                 if (maskedAction == AMOTION_EVENT_ACTION_DOWN
                         && (flags & InputWindowInfo::FLAG_WATCH_OUTSIDE_TOUCH)) {
-                    int32_t outsideTargetFlags = InputTarget::FLAG_DISPATCH_AS_OUTSIDE;
-                    if (isWindowObscuredAtPointLocked(windowHandle, x, y)) {
-                        outsideTargetFlags |= InputTarget::FLAG_WINDOW_IS_OBSCURED;
-                    } else if (isWindowObscuredLocked(windowHandle)) {
-                        outsideTargetFlags |= InputTarget::FLAG_WINDOW_IS_PARTIALLY_OBSCURED;
-                    }
-
                     mTempTouchState.addOrUpdateWindow(
-                            windowHandle, outsideTargetFlags, BitSet32(0));
+                            windowHandle, InputTarget::FLAG_DISPATCH_AS_OUTSIDE, BitSet32(0));
                 }
             }
         }
@@ -1876,6 +1869,11 @@ void InputDispatcher::pokeUserActivityLocked(const EventEntry* eventEntry) {
             & InputDispatcher::doPokeUserActivityLockedInterruptible);
     commandEntry->eventTime = eventEntry->eventTime;
     commandEntry->userActivityEventType = eventType;
+    if (eventType == USER_ACTIVITY_EVENT_BUTTON) {
+        const KeyEntry* keyEntry = static_cast<const KeyEntry*>(eventEntry);
+        commandEntry->keyEntry = const_cast<KeyEntry*>(keyEntry);
+        keyEntry->refCount += 1;
+    }
 }
 
 void InputDispatcher::prepareDispatchCycleLocked(nsecs_t currentTime,
@@ -3866,7 +3864,20 @@ bool InputDispatcher::afterMotionEventLockedInterruptible(const sp<Connection>& 
 void InputDispatcher::doPokeUserActivityLockedInterruptible(CommandEntry* commandEntry) {
     mLock.unlock();
 
-    mPolicy->pokeUserActivity(commandEntry->eventTime, commandEntry->userActivityEventType);
+    int32_t keyCode = AKEYCODE_UNKNOWN;
+
+    if (commandEntry->userActivityEventType == USER_ACTIVITY_EVENT_BUTTON &&
+            commandEntry->keyEntry) {
+        keyCode = commandEntry->keyEntry->keyCode;
+    }
+
+    mPolicy->pokeUserActivity(commandEntry->eventTime, commandEntry->userActivityEventType,
+            keyCode);
+
+    if (commandEntry->userActivityEventType == USER_ACTIVITY_EVENT_BUTTON &&
+            commandEntry->keyEntry) {
+        commandEntry->keyEntry->release();
+    }
 
     mLock.lock();
 }
@@ -4024,11 +4035,7 @@ InputDispatcher::KeyEntry::~KeyEntry() {
 }
 
 void InputDispatcher::KeyEntry::appendDescription(String8& msg) const {
-    msg.appendFormat("KeyEvent(deviceId=%d, source=0x%08x, action=%d, "
-            "flags=0x%08x, keyCode=%d, scanCode=%d, metaState=0x%08x, "
-            "repeatCount=%d), policyFlags=0x%08x",
-            deviceId, source, action, flags, keyCode, scanCode, metaState,
-            repeatCount, policyFlags);
+    msg.appendFormat("KeyEvent");
 }
 
 void InputDispatcher::KeyEntry::recycle() {
@@ -4069,19 +4076,7 @@ InputDispatcher::MotionEntry::~MotionEntry() {
 }
 
 void InputDispatcher::MotionEntry::appendDescription(String8& msg) const {
-    msg.appendFormat("MotionEvent(deviceId=%d, source=0x%08x, action=%d, actionButton=0x%08x, "
-            "flags=0x%08x, metaState=0x%08x, buttonState=0x%08x, "
-            "edgeFlags=0x%08x, xPrecision=%.1f, yPrecision=%.1f, displayId=%d, pointers=[",
-            deviceId, source, action, actionButton, flags, metaState, buttonState, edgeFlags,
-            xPrecision, yPrecision, displayId);
-    for (uint32_t i = 0; i < pointerCount; i++) {
-        if (i) {
-            msg.append(", ");
-        }
-        msg.appendFormat("%d: (%.1f, %.1f)", pointerProperties[i].id,
-                pointerCoords[i].getX(), pointerCoords[i].getY());
-    }
-    msg.appendFormat("]), policyFlags=0x%08x", policyFlags);
+    msg.appendFormat("MotionEvent");
 }
 
 
